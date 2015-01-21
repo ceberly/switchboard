@@ -7,16 +7,7 @@ import (
 	"net/http"
 )
 
-type Post struct {
-	id         int
-	ramble_id  int
-	text       string
-	user_id    int
-	created_at string
-	updated_at string
-}
-
-var subscriptions = make(map[chan []byte]bool)
+var switchboard = NewSwitchboard()
 
 func subscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
@@ -33,13 +24,13 @@ func subscribe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	subscription := make(chan []byte)
-	//XXX: I don't think that map access is atomic
-	subscriptions[subscription] = true
+	ch := switchboard.Subscribe(1)
+	defer switchboard.Unsubscribe(1, ch)
 
 	for {
-		data := <-subscription
+		data := <-ch
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
 	}
@@ -52,25 +43,24 @@ func publish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var p Post
+	log.Println(r)
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&p)
 	if err != nil {
+		log.Println(err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	b, err := json.Marshal(p)
-	log.Println("publshing ", b)
-
-	for s := range subscriptions {
-		s <- b
-	}
+	log.Printf("publishing %v", p)
+	switchboard.Publish(1, p)
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, "OK")
 }
 
 func main() {
+	log.Println("starting up")
 	http.HandleFunc("/subscribe", subscribe)
 	http.HandleFunc("/publish", publish)
 	err := http.ListenAndServe(":8080", nil)

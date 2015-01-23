@@ -1,17 +1,28 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"regexp"
 )
 
-var switchboard = NewSwitchboard()
+var (
+	switchboard = NewSwitchboard()
+	subscribeRE = regexp.MustCompile("^/subscribe/([0-9]+)/?$")
+	publishRE = regexp.MustCompile("^/publish/([0-9]+)/?$")
+)
 
 func subscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	m := subscribeRE.FindStringSubmatch(r.URL.Path)
+	if len(m) != 2 {
+		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
@@ -26,13 +37,23 @@ func subscribe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	ch := switchboard.Subscribe(1)
-	defer switchboard.Unsubscribe(1, ch)
+	ch := switchboard.Subscribe(ChannelIndex(m[1]))
+	defer switchboard.Unsubscribe(ChannelIndex(m[1]), ch)
+
+	closeNotifier, ok := w.(http.CloseNotifier)
+	if !ok {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	for {
-		data := <-ch
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
+		select {
+		case data := <-ch:
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		case <-closeNotifier.CloseNotify():
+			return
+		}
 	}
 }
 
@@ -42,18 +63,19 @@ func publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var p Post
-	log.Println(r)
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&p)
-	if err != nil {
-		log.Println(err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	m := publishRE.FindStringSubmatch(r.URL.Path)
+	if len(m) != 2 {
+		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("publishing %v", p)
-	switchboard.Publish(1, p)
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	switchboard.Publish(ChannelIndex(m[1]), body)
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, "OK")
@@ -61,8 +83,8 @@ func publish(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	log.Println("starting up")
-	http.HandleFunc("/subscribe", subscribe)
-	http.HandleFunc("/publish", publish)
+	http.HandleFunc("/subscribe/", subscribe)
+	http.HandleFunc("/publish/", publish)
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatal(err)

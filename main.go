@@ -8,10 +8,12 @@ import (
 	"regexp"
 )
 
+import _ "expvar"
+
 var (
 	switchboard = NewSwitchboard()
 	subscribeRE = regexp.MustCompile("^/subscribe/([0-9]+)/?$")
-	publishRE = regexp.MustCompile("^/publish/([0-9]+)/?$")
+	publishRE   = regexp.MustCompile("^/publish/([0-9]+)/?$")
 )
 
 func subscribe(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +38,8 @@ func subscribe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher.Flush()
 
 	ch := switchboard.Subscribe(ChannelIndex(m[1]))
 	defer switchboard.Unsubscribe(ChannelIndex(m[1]), ch)
@@ -83,6 +87,7 @@ func publish(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	log.Println("starting up")
+
 	http.HandleFunc("/subscribe/", subscribe)
 	http.HandleFunc("/publish/", publish)
 	err := http.ListenAndServe(":8080", nil)

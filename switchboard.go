@@ -5,15 +5,15 @@ import (
 )
 
 type Post struct {
-	Id         int
-	Text       string
+	Id   int
+	Text string
 }
 
 type ChannelIndex string
 
 type Subscription chan []byte
 type Channel map[Subscription]bool
-type ChannelMap struct { 
+type ChannelMap struct {
 	sync.RWMutex
 	m map[ChannelIndex]Channel
 }
@@ -24,7 +24,7 @@ type Switchboard struct {
 
 func NewSwitchboard() *Switchboard {
 	return &Switchboard{
-		ChannelMap{ m: make(map[ChannelIndex]Channel) },
+		ChannelMap{m: make(map[ChannelIndex]Channel)},
 	}
 }
 
